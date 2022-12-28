@@ -4,18 +4,19 @@ import os, fnmatch
 from os import listdir
 from os.path import isfile, join
 
-from datetime import datetime, date, time, timedelta
+from datetime import timedelta
 from dateutil import parser
 
 from sunpy.time import TimeRange
 
-from astropy.io.fits import Header
+#from astropy.io.fits import Header
 
 import h5py
 import csv
 from tqdm import tqdm
 
 import json
+import pandas as pd
 
 """
 Encoder to solve TypeError: Object of type 'int64' is not JSON serializable from stackoverflow 
@@ -30,6 +31,195 @@ class NpEncoder(json.JSONEncoder):
             return obj.tolist()
         else:
             return super(NpEncoder, self).default(obj)
+        
+"""
+Small class to hold frequently used parameters and base-specific methods
+"""
+class Base_Class:
+    
+    #static attributes
+    data_raw_times_num = 3
+    
+    def __init__(self, base_full, home_dir, time_step):
+        self.base_full = base_full
+        self.home_dir = home_dir
+        self.time_window = time_step
+        
+        
+    #dictionary for various scenarios
+    
+    """
+    Uses base/product input information to assign any necessary properties that will
+    be used by future functions.
+    """
+    def set_base_dictionary(self):
+        if 'MDI' in self.base_full:
+            self.base = 'MDI'
+            self.mission = 'SOHO'
+        elif 'HMI' in self.base_full:
+            self.base = 'HMI'
+            self.mission = 'SDO'
+        elif 'AIA' in self.base_full:
+            self.base = 'AIA'
+            self.wavelen = int(self.base_full[3:])
+            self.mission = 'SDO'
+        elif 'EIT' in self.base_full:
+            self.base = 'EIT'
+            self.wavelen = int(self.base_full[3:])
+            self.mission = 'SOHO'
+            self.data_raw_times_num = 2
+        elif 'LASCO' in self.base_full:
+            self.base = 'LASCO'
+            self.mission = 'SOHO'
+            self.detector = self.base_full.split('_')[1]
+        else:
+            print('Not a valid base name')
+            
+    
+    #class methods
+    """
+    READS THE TIME WINDOW USED WHEN RUNNING SOHO_DATA_GEN.PY FROM THE H5 DATA FILE. THIS TIME_WINDOW IS TIME_STEP_PREV HERE.
+    """
+    def time_step_prev_reader(self):
+        pattern = f'*{self.base}*{self.mission}*[metadata]*[!sync].h5'
+        name = pattern_finder(self.home_dir, pattern)
+        print('name from time_step_prev_reader:', name)
+        time_step_prev = name.split('_')[-5] #was [-4] previously and [-2] before that
+        print('time_step_prev from fcn:', time_step_prev)
+        
+        return int(time_step_prev)
+    
+    
+    """
+    READ IN TIMES FROM FITS FILES PER PRODUCT TYPE IF THESE HAVE BEEN GENERATED LOCALLY BY PREVIOUSLY RUNNING SOHO_DATA_GEN.PY.
+    FITS FILES ARE ALL UNIQUE AND SORTED TO ENSURE THAT THEY FOLLOW THE ORDER OF THE H5 DATA CUBE THAT HAS BEEN MADE EARLIER BY RUNNING SOHO_DATA_GEN.PY.
+    """
+    def fits_times_reader(self): 
+    
+        print('base:', self.base)
+        filepath = self.home_dir + self.base  + f'_{self.mission}' + '/'
+    
+        data_files_pre_pre = [f for f in listdir(filepath) if isfile(join(filepath, f))]
+        data_files_pre = [f for f in data_files_pre_pre if 'fits' in f] #to ensure that only FITS files are collected, just in case    
+        data_files = np.sort(data_files_pre)
+        
+        data_raw_times = [elem.split('_')[self.data_raw_times_num] for elem in data_files]
+         
+            
+        return data_raw_times
+    
+    """
+    READ IN TIMES FROM CSV FILES PER PRODUCT TYPE. TAKING UNIQUE VALUES TO ENSURE UNIQUE TIMES IN CSV FILES. {THIS IS THE CASE EXCEPT FOR LASCO_C2 WHERE THERE APPEARS ONCE TIME DUPLICATE}
+    """
+    def csv_times_reader(self): 
+        
+        pattern = f'*{self.base}*{self.mission}*[!sync].csv'
+        name = pattern_finder(self.home_dir, pattern)
+        print('name from csv_times_reader:', name)
+        csv_data = pd.read_csv(name, usecols= ['time_at_ind'])
+        csv_uniq_times = list(np.unique(csv_data))
+        print('len(csv_uniq_times):', len(csv_uniq_times))
+                    
+        return csv_uniq_times
+    
+    """
+    FIND CORRESPONDING DATA CUBE PER PRODUCT AND EXTRACT ITS DATA AND DIMENSION.
+    """
+    def cube_data_reader(self):
+        pattern = f'*{self.base}*{self.mission}*[metadata]*[!sync].h5'
+        name = pattern_finder(self.home_dir, pattern)            
+        print('cube name:', name)
+        cube_dim = name.split('_')[-2] #.split('.')[0] #str
+        print('cube_dim:', cube_dim)
+                    
+        cube = h5py.File(f'{self.home_dir}{self.name}', 'r')
+        cube_data = cube[f'{self.base}_{self.mission}_{cube_dim}'][:]
+        
+        meta_items_pre = cube[f'{self.base}_{self.mission}_{cube_dim}_metadata'][()]    
+        print('len(meta_items_pre):', len(meta_items_pre))
+        
+        cube.close()
+    
+        return cube_data, cube_dim, meta_items_pre ### meta_items #, str(cube_hdr) ???????
+    
+    """
+    OUTPUTS DATA CUBES FOR EACH SPECIFIED PRODUCT. THESE CUBES ARE THE REDUCED VERSIONS OF THE ORIGINAL ONES SINCE ONLY THE TIME SLICES THAT COME WITHIN THE SPECIFIED TIME_STEP HAVE BEEN RETAINED.
+    #cube_hdr method previously tried where meta_items replaced by cube_hdr
+    """
+    
+    def cube_sync_maker(self, base_list_len, cube_data, cube_dim, meta_items_pre, ind_start, ind_end, synch_time_inds_mod, date_start, date_finish, time_step_prev, flag_lasco=None):
+    
+         ### Fetching the metadata from the pre-synced data cubes ###
+              
+         meta_items = json.loads(meta_items_pre)
+         meta_data_keywords_pre = list(meta_items.keys())
+         print('len(meta_data_keywords_pre):', len(meta_data_keywords_pre))
+         
+         metadata_keywords_list = []
+         for i,ind in tqdm(enumerate(synch_time_inds_mod)):
+              metadata_keywords_pre = list(filter(lambda x: f'_{ind}' in x, meta_data_keywords_pre))
+              metadata_keywords = list(filter(lambda x: len(str(ind)) == len(x.split('_')[-1]),metadata_keywords_pre)) ### need this second filter to have exact match
+              metadata_keywords_list += metadata_keywords
+         print('len(metadata_keywords_list):', len(metadata_keywords_list))
+         
+                   
+         if flag_lasco is None:
+              cube_data_mod_pre_pre = cube_data[ind_start:ind_end+1]
+              cube_data_mod_pre = np.array([cube_data_mod_pre_pre[i] for i in synch_time_inds_mod])
+              cube_data_mod = cube_data_mod_pre.astype('int16')
+              file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+
+         else:
+              cube_data_mod = cube_data.astype('int16')
+              file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{flag_lasco}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+              
+         cube_sync = h5py.File(file_name, 'w')
+         cube_sync.create_dataset(f'{self.base}_{self.mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
+
+              
+         ### metadata method continued ###
+         slice_val_start = int(metadata_keywords_list[0].split('_')[-1])
+         print('slice_val_start:', slice_val_start)
+         
+         meta_data_dict = {}
+         slice_counter = 0
+         for i,met in tqdm(enumerate(metadata_keywords_list)):
+              if int(met.split('_')[-1]) > slice_val_start:
+                   slice_val_start = int(met.split('_')[-1]) #update slice_val_start to the next slice
+                   slice_counter +=1 #update to count next slice in sync cube
+              meta_data_dict[f'{met}_syncslice{slice_counter}'] = meta_items[met] ### these are the meta_items dictionary values    
+              #cube_sync.attrs[f'{met[0]}_syncslice{slice_counter}'] = met[1]
+         print('data cube slice count:', slice_counter)
+              
+         cube_sync.create_dataset(f'{self.base}_{self.mission}_{cube_dim}_metadata', data=json.dumps(meta_data_dict, cls=NpEncoder))
+         cube_sync.attrs['NOTE'] = 'JSON serialization'
+         
+         cube_sync.close()     
+         
+         return cube_sync
+    
+    """
+    OUTPUTS A CSV FILE CONTAINING THE RETAINED TIMES PER SPECIFIED PRODUCT WHICH COINCIDE WITH THE TIMES OF OTHER PRODUCTS WITHIN THE TIME_STEP.
+    """
+    def csv_time_sync_writer(self, base_list_len, date_start, date_finish, cube_dim, synch_time_list_mod, time_step_prev, flag_lasco=None):
+         if flag_lasco is None:
+             file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+         else:
+             file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+         
+         if not isfile(file_name):
+             with open(file_name, 'a') as f:
+                 writer = csv.writer(f, delimiter='\n')
+                 writer.writerow(synch_time_list_mod)
+    
+    
+    
+    
+    
+    
+    
+    
+#Mission_Product_Sync.py and BaseClass helper functions   
 
 """
 FIND SPECIFIED PATTERN USING FNMATCH 
@@ -45,67 +235,7 @@ def pattern_finder(home_dir, pattern):
     
     return name
 
-"""
-READ IN TIMES FROM FITS FILES PER PRODUCT TYPE IF THESE HAVE BEEN GENERATED LOCALLY BY PREVIOUSLY RUNNING SOHO_DATA_GEN.PY.
-FITS FILES ARE ALL UNIQUE AND SORTED TO ENSURE THAT THEY FOLLOW THE ORDER OF THE H5 DATA CUBE THAT HAS BEEN MADE EARLIER BY RUNNING SOHO_DATA_GEN.PY.
-"""
-def fits_times_reader(home_dir, base, mission): 
-
-    print('base:', base)
-    filepath = home_dir + base  + f'_{mission}' + '/'
-
-    data_files_pre_pre = [f for f in listdir(filepath) if isfile(join(filepath, f))]
-    data_files_pre = [f for f in data_files_pre_pre if 'fits' in f] #to ensure that only FITS files are collected, just in case    
-    data_files = np.sort(data_files_pre)
-    
-    if 'EIT' in base:
-        data_raw_times = [elem.split('_')[2] for elem in data_files]
-    else:
-        data_raw_times = [elem.split('_')[3] for elem in data_files]            
-        
-    return data_raw_times
-    
-"""
-READ IN TIMES FROM CSV FILES PER PRODUCT TYPE. TAKING UNIQUE VALUES TO ENSURE UNIQUE TIMES IN CSV FILES. {THIS IS THE CASE EXCEPT FOR LASCO_C2 WHERE THERE APPEARS ONCE TIME DUPLICATE}
-"""
-def csv_times_reader(home_dir, pattern):
-
-    name = pattern_finder(home_dir, pattern)
-    print('name from csv_times_reader:', name)
-    with open(f'{home_dir}{name}', 'r') as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter='\n')
-        csv_data = [line for line in csv_reader]
-    csv_uniq_times = list(np.unique(csv_data))
-    print('len(csv_uniq_times):', len(csv_uniq_times))
-                
-    return csv_uniq_times
-
-"""
-CHECKS THAT THE DIMENSION AMONG FITS FILES COMING FROM THE DIFFERENT SPECIFIED PRODUCTS IS INDEED THE SAME.
-"""
-def dimension_checker_from_fits(home_dir, base_list, mission):
-
-    data_dim_list = []
-    for base in base_list:
-        base = base.strip(' ')
-        filepath = home_dir + base + f'_{mission}' + '/'
-        data_file_pre = [f for f in listdir(filepath) if isfile(join(filepath, f))] #[0]
-        data_file = [f for f in data_file_pre if 'fits' in f][0]
-    
-        if 'EIT' in base:
-            data_dim = data_file.split('_')[3].split('.')[0]
-        else:
-            data_dim = data_file.split('_')[4].split('.')[0]        
-    
-        data_dim_list.append(data_dim)
-    
-    ind_dim = np.where(data_dim_list[0] == np.array(data_dim_list))[0] #seems that np.array() is required since have str as elements.
-    
-    if len(ind_dim) == len(base_list):
-        return True
-    else:
-        return False
-        
+      
 """
 CHECKS THAT THE DIMENSION AMONG THE H5 CUBE AND CSV FILES COMING FROM THE DIFFERENT SPECIFIED PRODUCTS IS INDEED THE SAME.
 """
@@ -168,46 +298,9 @@ def min_time_step(data_times):
 
     return min_time_diff
 
-"""
-READS THE TIME WINDOW USED WHEN RUNNING SOHO_DATA_GEN.PY FROM THE H5 DATA FILE. THIS TIME_WINDOW IS TIME_STEP_PREV HERE.
-"""
-def time_step_prev_reader(home_dir, pattern):
 
-    name = pattern_finder(home_dir, pattern)
-    print('name from time_step_prev_reader:', name)
-    time_step_prev = name.split('_')[-5] #was [-4] previously and [-2] before that
-    print('time_step_prev from fcn:', time_step_prev)
     
-    return int(time_step_prev)
-    
-"""
-FIND CORRESPONDING DATA CUBE PER PRODUCT AND EXTRACT ITS DATA AND DIMENSION.
-"""
-def cube_data_reader(home_dir, base, mission, pattern):
 
-    name = pattern_finder(home_dir, pattern)            
-    print('cube name:', name)
-    cube_dim = name.split('_')[-2] #.split('.')[0] #str
-    print('cube_dim:', cube_dim)
-                
-    cube = h5py.File(f'{home_dir}{name}', 'r')
-    cube_data = cube[f'{base}_{mission}_{cube_dim}'][:]
-    
-    #cube_data = cube[f'{base}_{mission}_{cube_dim}/data'][:]    
-    #cube_hdr = cube[f'{base}_{mission}_{cube_dim}/header'][:].asstr(encoding = 'utf-8') #_header'][:]
-    
-    ### old meta_items method ###
-    #meta_items = list(cube.attrs.items())
-    #print('len(meta_items):', len(meta_items))
-    
-    ### new meta items method ###
-    #meta_items = json.loads(cube[f'{base}_{mission}_{cube_dim}_metadata'][()])
-    meta_items_pre = cube[f'{base}_{mission}_{cube_dim}_metadata'][()]    
-    print('len(meta_items_pre):', len(meta_items_pre))
-    
-    cube.close()
-
-    return cube_data, cube_dim, meta_items_pre ### meta_items #, str(cube_hdr) ???????
     
 
 """
@@ -292,97 +385,5 @@ def lasco_diff_times_inds(lasco_sync_times):
      
      return lasco_ind_Fcorona_24h
 
-"""
-OUTPUTS DATA CUBES FOR EACH SPECIFIED PRODUCT. THESE CUBES ARE THE REDUCED VERSIONS OF THE ORIGINAL ONES SINCE ONLY THE TIME SLICES THAT COME WITHIN THE SPECIFIED TIME_STEP HAVE BEEN RETAINED.
-#cube_hdr method previously tried where meta_items replaced by cube_hdr
-"""
 
-def cube_sync_maker(home_dir, base, base_list_len, cube_data, cube_dim, meta_items_pre, ind_start, ind_end, synch_time_inds_mod, date_start, date_finish, time_step_prev, time_step, mission, flag_lasco=None):
-
-     ### Fetching the metadata from the pre-synced data cubes ###
-          
-     ### old meta-data method ###
-     #meta_list_transpose = np.transpose(meta_items)[0] #these are the pseudo dict keys from the HDF5 attributes containing the FITS metadata!
-          
-     ### new meta-data method ###
-     meta_items = json.loads(meta_items_pre)
-     meta_data_keywords_pre = list(meta_items.keys())
-     print('len(meta_data_keywords_pre):', len(meta_data_keywords_pre))
-     
-     metadata_keywords_list = []
-     for i,ind in tqdm(enumerate(synch_time_inds_mod)):
-          metadata_keywords_pre = list(filter(lambda x: f'_{ind}' in x, meta_data_keywords_pre))
-          metadata_keywords = list(filter(lambda x: len(str(ind)) == len(x.split('_')[-1]),metadata_keywords_pre)) ### need this second filter to have exact match
-          #slice_attr = list(filter(lambda x: f'_{ind}' in x, meta_data_keywords_pre) #meta_list_transpose)) #list of attr corresponding to slice
-          #meta_ind_start = np.where(np.array(slice_attr[0]) == meta_data_keywords_pre)[0][0]
-          #meta_ind_fin = np.where(np.array(slice_attr[len(slice_attr)-1]) == meta_data_keywords_pre)[0][0]
-          #metadata_keywords_list += list(meta_items[meta_ind_start:meta_ind_fin+1])
-          metadata_keywords_list += metadata_keywords
-     print('len(metadata_keywords_list):', len(metadata_keywords_list))
-     
-               
-     if flag_lasco is None:
-          cube_data_mod_pre_pre = cube_data[ind_start:ind_end+1]
-          cube_data_mod_pre = np.array([cube_data_mod_pre_pre[i] for i in synch_time_inds_mod])
-          cube_data_mod = cube_data_mod_pre.astype('int16')
-          
-          ### This first method of writing metadata didn't work since HDF5 doesn't accept unicode; only byte strings
-          #cube_hdr_mod_pre_pre = cube_hdr[ind_start:ind_end+1]
-          #cube_hdr_mod_pre = [cube_hdr_mod_pre_pre[i] for i in synch_time_inds_mod]
-          #cube_hdr_mod = np.stack(cube_hdr_mod_pre)
-          
-          cube_sync = h5py.File(f'{home_dir}{date_start}_to_{date_finish}_{base}_{mission}_{base_list_len}products_{time_step_prev}_{time_step}_{cube_dim}_metadata_sync.h5', 'w')
-          #cube_sync_group = cube_sync.create_group(f'{base}_{mission}_{cube_dim}')
-          cube_sync.create_dataset(f'{base}_{mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
-          #cube_sync_group.create_dataset('header', data=cube_hdr_mod.tostring()) #not compressing images here since images compressed initially in data generation step #compression="gzip"          
-          #cube_sync.create_dataset(f'{base}_{mission}_{cube_dim}_header', data=cube_hdr_mod)
-          
-     else:
-          cube_data_mod = cube_data.astype('int16')
-          
-          cube_sync = h5py.File(f'{home_dir}{date_start}_to_{date_finish}_{base}_{flag_lasco}_{mission}_{base_list_len}products_{time_step_prev}_{time_step}_{cube_dim}_metadata_sync.h5', 'w')
-          #cube_sync_group = cube_sync.create_group(f'{base}_{mission}_{cube_dim}')
-          cube_sync.create_dataset(f'{base}_{mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
-          #cube_sync_group.create_dataset('header', data=cube_hdr.tostring())
-          #cube_sync.create_dataset(f'{base}_{mission}_{cube_dim}_header', data=cube_hdr)
-          
-     ### metadata method continued ###
-     slice_val_start = int(metadata_keywords_list[0].split('_')[-1])
-     print('slice_val_start:', slice_val_start)
-     
-     meta_data_dict = {}
-     slice_counter = 0
-     for i,met in tqdm(enumerate(metadata_keywords_list)):
-          if int(met.split('_')[-1]) > slice_val_start:
-               slice_val_start = int(met.split('_')[-1]) #update slice_val_start to the next slice
-               slice_counter +=1 #update to count next slice in sync cube
-          meta_data_dict[f'{met}_syncslice{slice_counter}'] = meta_items[met] ### these are the meta_items dictionary values    
-          #cube_sync.attrs[f'{met[0]}_syncslice{slice_counter}'] = met[1]
-     print('data cube slice count:', slice_counter)
-          
-     cube_sync.create_dataset(f'{base}_{mission}_{cube_dim}_metadata', data=json.dumps(meta_data_dict, cls=NpEncoder))
-     cube_sync.attrs['NOTE'] = 'JSON serialization'
-     
-     cube_sync.close()     
-     
-     return cube_sync
-     
-"""
-OUTPUTS A CSV FILE CONTAINING THE RETAINED TIMES PER SPECIFIED PRODUCT WHICH COINCIDE WITH THE TIMES OF OTHER PRODUCTS WITHIN THE TIME_STEP.
-"""
-def csv_time_sync_writer(home_dir, base, base_list_len, date_start, date_finish, cube_dim, synch_time_list_mod, time_step_prev, time_step, mission, flag_lasco=None):
-     
-     if flag_lasco is None:    
-          if not isfile(f'{home_dir}{date_start}_to_{date_finish}_{base}_{mission}_{base_list_len}products_{time_step_prev}_{time_step}_{cube_dim}_times_sync.csv'):
-               with open(f'{home_dir}{date_start}_to_{date_finish}_{base}_{mission}_{base_list_len}products_{time_step_prev}_{time_step}_{cube_dim}_times_sync.csv', 'a') as f:
-                 writer = csv.writer(f, delimiter='\n')
-                 writer.writerow(synch_time_list_mod)
-     else:
-          if not isfile(f'{home_dir}{date_start}_to_{date_finish}_{base}_{mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{time_step}_{cube_dim}_times_sync.csv'):
-               with open(f'{home_dir}{date_start}_to_{date_finish}_{base}_{mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{time_step}_{cube_dim}_times_sync.csv', 'a') as f:
-                 writer = csv.writer(f, delimiter='\n')
-                 writer.writerow(synch_time_list_mod)     
-     
   
-  
-     
