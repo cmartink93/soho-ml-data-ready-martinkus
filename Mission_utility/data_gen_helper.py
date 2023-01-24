@@ -367,7 +367,8 @@ def fetch_indices(ind,product_results,time_window,prev_time, BaseClass):
     else:
         
         for value in ind:
-            all_size_sieved_times_pre_list.append(product_results[0,:][int(value)]['time']['start'])
+            #all_size_sieved_times_pre_list.append(product_results[0,:][int(value)]['time']['start'])
+            all_size_sieved_times_pre_list.append(product_results[0,:][int(value)]['Start Time'].strftime('%Y%m%d%H%M%S'))
             
     all_size_sieved_times = list(np.unique(all_size_sieved_times_pre_list))
     all_size_sieved_times_aug = prev_time + all_size_sieved_times #prev_time = [] for the very first loop and [last best time from previous loop] for subsequent loops.

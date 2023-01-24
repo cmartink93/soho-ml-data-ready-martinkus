@@ -40,10 +40,12 @@ class Base_Class:
     #static attributes
     data_raw_times_num = 3
     
-    def __init__(self, base_full, home_dir, time_step):
+    def __init__(self, base_full, home_dir, time_step, date_start, date_finish):
         self.base_full = base_full
         self.home_dir = home_dir
         self.time_window = time_step
+        self.date_start = date_start
+        self.date_finish = date_finish
         
         
     #dictionary for various scenarios
@@ -147,7 +149,7 @@ class Base_Class:
     #cube_hdr method previously tried where meta_items replaced by cube_hdr
     """
     
-    def cube_sync_maker(self, base_list_len, cube_data, cube_dim, meta_items_pre, ind_start, ind_end, synch_time_inds_mod, date_start, date_finish, time_step_prev, flag_lasco=None):
+    def cube_sync_maker(self, base_list_len, cube_data, cube_dim, meta_items_pre, ind_start, ind_end, sync_time_inds_mod, time_step_prev, flag_lasco=None):
     
          ### Fetching the metadata from the pre-synced data cubes ###
               
@@ -156,7 +158,7 @@ class Base_Class:
          print('len(meta_data_keywords_pre):', len(meta_data_keywords_pre))
          
          metadata_keywords_list = []
-         for i,ind in tqdm(enumerate(synch_time_inds_mod)):
+         for i,ind in tqdm(enumerate(sync_time_inds_mod)):
               metadata_keywords_pre = list(filter(lambda x: f'_{ind}' in x, meta_data_keywords_pre))
               metadata_keywords = list(filter(lambda x: len(str(ind)) == len(x.split('_')[-1]),metadata_keywords_pre)) ### need this second filter to have exact match
               metadata_keywords_list += metadata_keywords
@@ -165,13 +167,13 @@ class Base_Class:
                    
          if flag_lasco is None:
               cube_data_mod_pre_pre = cube_data[ind_start:ind_end+1]
-              cube_data_mod_pre = np.array([cube_data_mod_pre_pre[i] for i in synch_time_inds_mod])
+              cube_data_mod_pre = np.array([cube_data_mod_pre_pre[i] for i in sync_time_inds_mod])
               cube_data_mod = cube_data_mod_pre.astype('int16')
-              file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
 
          else:
               cube_data_mod = cube_data.astype('int16')
-              file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{flag_lasco}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{flag_lasco}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
               
          cube_sync = h5py.File(file_name, 'w')
          cube_sync.create_dataset(f'{self.base}_{self.mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
@@ -201,16 +203,16 @@ class Base_Class:
     """
     OUTPUTS A CSV FILE CONTAINING THE RETAINED TIMES PER SPECIFIED PRODUCT WHICH COINCIDE WITH THE TIMES OF OTHER PRODUCTS WITHIN THE TIME_STEP.
     """
-    def csv_time_sync_writer(self, base_list_len, date_start, date_finish, cube_dim, synch_time_list_mod, time_step_prev, flag_lasco=None):
+    def csv_time_sync_writer(self, base_list_len, cube_dim, sync_time_list_mod, time_step_prev, flag_lasco=None):
          if flag_lasco is None:
-             file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
          else:
-             file_name = f'{self.home_dir}{date_start}_to_{date_finish}_{self.base}_{self.mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
          
          if not isfile(file_name):
              with open(file_name, 'a') as f:
                  writer = csv.writer(f, delimiter='\n')
-                 writer.writerow(synch_time_list_mod)
+                 writer.writerow(sync_time_list_mod)
     
     
     
@@ -259,7 +261,7 @@ def dimension_checker_from_h5cube_csv(home_dir, base_list, mission): #assumes al
         return False        
 
 """
-CONVERTS TIME STRINGS INTO DATETIME OBJECTS. ALLOWS TO SPECIFY A SUBSET OF THE DATE RANGES THAT HAD BEEN USED WHEN RUNNING SOHO_DATA_GEN.PY. 
+CONVERTS TIME STRINGS INTO DATETIME OBJECTS. ALLOWS TO SPECIFY A SUBSET OF THE DATE RANGES THAT HAD BEEN USED WHEN RUNNING MISSION_DATA_GEN.PY. 
 """
 def times_actualizer(data_raw_times, date_start, date_finish): #produces a subset of the original times if so desired by the user. Adds flexibility in choice of time range!
 
@@ -318,20 +320,20 @@ def shortest_prod_list_index_finder(product_list):
 
 
 """
-FINDING THE TIMES AND INDICES THAT ARE SYNCHED BETWEEN THE ENTERED PRODUCTS. MOVES ALONG THE SHORTEST PRODUCT LIST. OVERLAP TIME INTERVAL DETERMINED BY MOVING +/- HALF OF THE ORIGINAL TIME_STEP.
-THEN IF THE TIME STEP ENTERED IN THIS CODE IS AN INTEGER MULTIPLE OF THE ORIGINAL TIME STEP, THE SYNCHED TIMES COMPUTED ON THE ORIGINAL TIME STEP ARE SUBSEQUENTLY SUBSAMPLED.
+FINDING THE TIMES AND INDICES THAT ARE syncED BETWEEN THE ENTERED PRODUCTS. MOVES ALONG THE SHORTEST PRODUCT LIST. OVERLAP TIME INTERVAL DETERMINED BY MOVING +/- HALF OF THE ORIGINAL TIME_STEP.
+THEN IF THE TIME STEP ENTERED IN THIS CODE IS AN INTEGER MULTIPLE OF THE ORIGINAL TIME STEP, THE syncED TIMES COMPUTED ON THE ORIGINAL TIME STEP ARE SUBSEQUENTLY SUBSAMPLED.
 """
 def sync_times_and_inds(product_list, ind_min_len, time_step, time_step_prev): #main engine of the algorithm
 
-    synch_time_list = []
-    synch_time_inds_list = []
+    sync_time_list = []
+    sync_time_inds_list = []
     
-    ratio = int(time_step / time_step_prev) #in order to subsample (e.g., time_step_prev=6 but now want time_step=12, so will need to take every other element found from synching by original time)
+    ratio = int(time_step / time_step_prev) #in order to subsample (e.g., time_step_prev=6 but now want time_step=12, so will need to take every other element found from syncing by original time)
     print('ratio:', ratio)
     
     for i,time_val in tqdm(enumerate(product_list[ind_min_len])): #so moving along shortest product list
         time_range = TimeRange(time_val - timedelta(hours=time_step_prev/2), time_val + timedelta(hours=time_step_prev/2)) #heart of the algorithm
-        #always synch on original time_window and then can subsample from that if necessary. #time_val is a datetime object so can subtract a timedelta from it.
+        #always sync on original time_window and then can subsample from that if necessary. #time_val is a datetime object so can subtract a timedelta from it.
         temp_ind_list = []
         temp_time_list = []
         for j,product in enumerate(product_list):
@@ -348,24 +350,24 @@ def sync_times_and_inds(product_list, ind_min_len, time_step, time_step_prev): #
             temp_time_list.append(temp_time)
         
         if len(np.where(np.array(temp_ind_list) != np.array(temp_ind_list))[0]) == 0: #this is used to pick only those instances where nan vals are not present.
-            synch_time_inds_list.append(temp_ind_list) #is of len(base_list)            
-            synch_time_list.append(temp_time_list) #is of len(base_list)     
+            sync_time_inds_list.append(temp_ind_list) #is of len(base_list)            
+            sync_time_list.append(temp_time_list) #is of len(base_list)     
 
-    return synch_time_inds_list[::ratio], synch_time_list[::ratio]
+    return sync_time_inds_list[::ratio], sync_time_list[::ratio]
 
 
 """
-USE THE TIMES AND INDICES THAT ARE SYNCHED BETWEEN THE ENTERED PRODUCTS AND REORDER BY ORDER OF PRODUCTS FOLLOWING ORDER OF BASE_LIST: USER ENTERED ORDER OF PRODUCTS
+USE THE TIMES AND INDICES THAT ARE syncED BETWEEN THE ENTERED PRODUCTS AND REORDER BY ORDER OF PRODUCTS FOLLOWING ORDER OF BASE_LIST: USER ENTERED ORDER OF PRODUCTS
 """
-def sync_times_and_inds_sort_by_product(synch_time_inds_list, synch_time_list):
+def sync_times_and_inds_sort_by_product(sync_time_inds_list, sync_time_list):
 
-     synch_time_inds_list_ravel = np.ravel(synch_time_inds_list, order='F')
-     synch_time_inds_list_mod = np.hsplit(synch_time_inds_list_ravel,len(synch_time_inds_list[0])) #len(synch_time_inds_list[0]) should be equal to len(base_list)!
+     sync_time_inds_list_ravel = np.ravel(sync_time_inds_list, order='F')
+     sync_time_inds_list_mod = np.hsplit(sync_time_inds_list_ravel,len(sync_time_inds_list[0])) #len(sync_time_inds_list[0]) should be equal to len(base_list)!
      
-     synch_time_list_ravel = np.ravel(synch_time_list, order='F')
-     synch_time_list_mod = np.hsplit(synch_time_list_ravel,len(synch_time_list[0])) #len(synch_time_list[0]) should be equal to len(base_list)!
+     sync_time_list_ravel = np.ravel(sync_time_list, order='F')
+     sync_time_list_mod = np.hsplit(sync_time_list_ravel,len(sync_time_list[0])) #len(sync_time_list[0]) should be equal to len(base_list)!
      
-     return synch_time_inds_list_mod, synch_time_list_mod
+     return sync_time_inds_list_mod, sync_time_list_mod
 
 """
 OUTPUTS TIMES AND INDICES TO BE USED FROM LASCO DIFFERENCE IMAGES. ### NEED TO TAKE INTO ACCOUNT THAT COULD HAVE BOTH C2 AND C3 PRESENT SIMULTANEOUSLY!!!
