@@ -3,11 +3,11 @@ from time import process_time
 import numpy as np
 import Mission_utility.product_time_sync as pts
 
-date_start =  '2010-10-01'#'2002-04-01' #'1999-04-04' # '2010-10-01'
-date_finish = '2010-10-05'#'2002-04-07' #'1999-04-09' # '2010-10-05'
+date_start =  '2005-12-01'#'2002-04-01' #'1999-04-04' # '2010-10-01'
+date_finish = '2005-12-07'#'2002-04-07' #'1999-04-09' # '2010-10-05'
 time_step = 12
 home_dir = '/Users/gohawks/Desktop/soho-ml-data/soho-ml-data-ready-martinkus/'
-bases = 'MDI_96m' #,LASCO_C3'#MDI_96m #AIA #HMI #'EIT195'
+bases = 'LASCO_C2, EIT195' #,LASCO_C3'#MDI_96m #AIA #HMI #'EIT195'
 fits_provided = 'Y' #are fits files provided?
 sub_Fcorona = 'N' #if applicable, do you want additional data cubes that subtract fcorona?
 
@@ -26,6 +26,11 @@ print('base_list:', base_list)
 print('time_step in hours:', time_step)
 time_step_sec = time_step*3600
     
+data_dim_list = []
+time_step_prev_list = []
+dim_err = "there is a mismatch in dimensionality among one or more products (e.g., 128x128 vs 256x256) in the directory"
+time_step_err = "selected time step has to be greater than or equal to the original time step used (e.g., can not choose < 6 hrs if original time step was 6 hrs)"
+
 for base in base_list:
     
     base = base.strip(' ')
@@ -36,15 +41,21 @@ for base in base_list:
     BaseClass_list.append(BaseClass)
     
     time_step_prev = BaseClass.time_step_prev_reader()
+    time_step_prev_list.append(time_step_prev)
+    
+    if (time_step_prev > time_step):
+        raise ValueError(time_step_err)
+        exit
+    
     print('time_step_prev:', time_step_prev)
     
-    if (fits_provided == 'Y') or (fits_provided == 'y'): #so deal with .fits files since contain all info that need such as the time and dim. additionally have h5 cube and csv file too.
-        found_times = BaseClass.fits_times_reader() #based on indiv base!
-        dim_err = "there is a mismatch in dimensionality among one or more products (e.g., 128x128 vs 256x256) in the directory"
+    if (fits_provided.upper() == 'Y'): #so deal with .fits files since contain all info that need such as the time and dim. additionally have h5 cube and csv file too.
+        found_times = BaseClass.fits_times_reader()
+        data_dim_list = BaseClass.dimension_checker_from_fits(data_dim_list)
         
-    elif (fits_provided == 'N') or (fits_provided == 'n'): #so dealing with the downloaded datasync_times_and_inds cubes and csv files but no fits files. so need times from csv and dim from h5 cube or csv. both h5 and csv used.
+    elif (fits_provided.upper() == 'N'): #so dealing with the downloaded datasync_times_and_inds cubes and csv files but no fits files. so need times from csv and dim from h5 cube or csv. both h5 and csv used.
         found_times = BaseClass.csv_times_reader()
-        dim_err = "there is a mismatch in dimensionality among one or more products reported in the h5 and csv files in the directory (e.g., 128x128 vs 256x256)"
+        data_dim_list = BaseClass.dimension_checker_from_h5cube_csv(data_dim_list)
         
     product_list.append(pts.times_actualizer(found_times, BaseClass.date_start, BaseClass.date_finish)[0]) #so the first return of times_actualizer which now returns two objects
     slice_start_ind_list.append(pts.times_actualizer(found_times, BaseClass.date_start, BaseClass.date_finish)[2][0]) #first start entry
@@ -52,34 +63,39 @@ for base in base_list:
                     
     min_time_diff = pts.min_time_step(pts.times_actualizer(found_times, BaseClass.date_start, BaseClass.date_finish)[1])
     print('min_time_diff in hours:', min_time_diff)
-    if time_step_prev > time_step: 
-        #so times_actualizer()[1] because want the data_times original and not the revised ones in order to have full range when take min.
-        raise ValueError("selected time step has to be greater than or equal to the original time step used (e.g., can not choose < 6 hrs if original time step was 6 hrs)")
-        
-    elif not pts.dimension_checker_from_fits(BaseClass.home_dir, base_list, BaseClass.mission): #strictly the for loop is about a single base but here already raise exception for all bases because need len(base_list) here!
-        raise ValueError(dim_err)
-        
-    else:
-        continue
+    
+ind_dim = np.where(data_dim_list[0] == np.array(data_dim_list))[0] 
+         
+if len(ind_dim) != len(data_dim_list):   
+    raise ValueError(dim_err)
+    
 
 
 ind_min_len = pts.shortest_prod_list_index_finder(product_list)
+time_step_prev_max = np.max(time_step_prev_list)
     
-sync_time_inds_list, sync_time_list = pts.sync_times_and_inds(product_list, ind_min_len, time_step, time_step_prev)
+sync_time_inds_list, sync_time_list = pts.sync_times_and_inds(product_list, ind_min_len, time_step, time_step_prev_max)
 sync_time_inds_list_mod, sync_time_list_mod = pts.sync_times_and_inds_sort_by_product(sync_time_inds_list, sync_time_list)
 #print('sync_time_list_mod_main:', sync_time_list_mod)
 
+BaseClass_list_len = len(BaseClass_list)
 
 lasco_diff_ind_Fcorona_24h_list = []
 lasco_diff_len_ind_Fcorona_24h_list = [] #C2 and C3 list should be the same size even after 24 hr index but good to check just in case
 
 for i,BaseClass in tqdm(enumerate(BaseClass_list)):
-    #base = base.strip(' ')
-    cube_data, cube_dim, meta_items  = BaseClass.cube_data_reader() #, cube_hdr #, meta_items
-    BaseClass.cube_sync_maker(base_list_len, cube_data, cube_dim, meta_items, slice_start_ind_list[i], slice_end_ind_list[i], sync_time_inds_list_mod[i], time_step_prev) ###cube_dim, cube_hdr, ##### cube_dim, meta_items
-    BaseClass.csv_time_sync_writer(base_list_len, cube_dim, sync_time_list_mod[i], time_step_prev)
     
-    if 'LASCO' in BaseClass.base_full:
+    cube_data, cube_dim, meta_items  = BaseClass.cube_data_reader() #, cube_hdr #, meta_items
+    
+    if len(cube_data) == 0:
+        raise ValueError('No data cubes were found for the exact user-specified dates')
+    
+    BaseClass.cube_sync_maker(BaseClass_list_len, cube_data, cube_dim, meta_items, slice_start_ind_list[i], slice_end_ind_list[i], sync_time_inds_list_mod[i], time_step_prev_max) ###cube_dim, cube_hdr, ##### cube_dim, meta_items
+    BaseClass.csv_time_sync_writer(BaseClass_list_len, cube_dim, sync_time_list_mod[i], time_step_prev_max)
+    
+    if ('LASCO' in BaseClass.base_full) and (sub_Fcorona.upper() == 'Y'):
+        
+
         
         lasco_ind_Fcorona_24h = pts.lasco_diff_times_inds(sync_time_list_mod[i])
         #print('lasco_ind_Fcorona_24h:',lasco_ind_Fcorona_24h)
@@ -88,10 +104,10 @@ for i,BaseClass in tqdm(enumerate(BaseClass_list)):
             lasco_diff_ind_Fcorona_24h_list.append(lasco_ind_Fcorona_24h)
             lasco_diff_len_ind_Fcorona_24h_list.append(len(lasco_ind_Fcorona_24h))
         
-#print('lasco_diff_ind_Fcorona_24h_list:', lasco_diff_ind_Fcorona_24h_list)
-print('lasco_diff_len_ind_Fcorona_24h_list:', lasco_diff_len_ind_Fcorona_24h_list)
+            #print('lasco_diff_ind_Fcorona_24h_list:', lasco_diff_ind_Fcorona_24h_list)
+            print('lasco_diff_len_ind_Fcorona_24h_list:', lasco_diff_len_ind_Fcorona_24h_list)
     
-if (len(lasco_diff_ind_Fcorona_24h_list)!=0):
+if (len(lasco_diff_ind_Fcorona_24h_list)!=0) and (sub_Fcorona.upper() == 'Y'):
     
     flag_lasco =  'Fcorona'   
     
@@ -118,8 +134,8 @@ if (len(lasco_diff_ind_Fcorona_24h_list)!=0):
         else:
             cube_data = cube_data_pre[ind_lasco_principal_Fcorona_24h+1]           
         
-        BaseClass.cube_sync_maker(base_list_len, cube_data, cube_dim, meta_items, slice_start_ind_list[i], slice_end_ind_list[i], sync_time_inds_list_mod[i][ind_lasco_principal_Fcorona_24h+1], time_step_prev, flag_lasco) #adding one to get to original time value since was taking differce of the time array ###cube_dim, cube_hdr, #####cube_dim, meta_items
-        BaseClass.csv_time_sync_writer(base_list_len, cube_dim, sync_time_list_mod[i][ind_lasco_principal_Fcorona_24h+1], time_step_prev, flag_lasco)
+        BaseClass.cube_sync_maker(BaseClass_list_len, cube_data, cube_dim, meta_items, slice_start_ind_list[i], slice_end_ind_list[i], sync_time_inds_list_mod[i][ind_lasco_principal_Fcorona_24h+1], time_step_prev, flag_lasco) #adding one to get to original time value since was taking differce of the time array ###cube_dim, cube_hdr, #####cube_dim, meta_items
+        BaseClass.csv_time_sync_writer(BaseClass_list_len, cube_dim, sync_time_list_mod[i][ind_lasco_principal_Fcorona_24h+1], time_step_prev, flag_lasco)
         #adding one to get to original time value since was taking differce of the time array
         
 

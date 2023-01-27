@@ -39,13 +39,15 @@ class Base_Class:
     
     #static attributes
     data_raw_times_num = 3
+    data_dim_num = 4
     
     def __init__(self, base_full, home_dir, time_step, date_start, date_finish):
         self.base_full = base_full
         self.home_dir = home_dir
-        self.time_window = time_step
+        self.time_step = time_step
         self.date_start = date_start
         self.date_finish = date_finish
+        self.time_step_prev = 0
         
         
     #dictionary for various scenarios
@@ -70,6 +72,7 @@ class Base_Class:
             self.wavelen = int(self.base_full[3:])
             self.mission = 'SOHO'
             self.data_raw_times_num = 2
+            self.data_dim_num = 3
         elif 'LASCO' in self.base_full:
             self.base = 'LASCO'
             self.mission = 'SOHO'
@@ -83,11 +86,12 @@ class Base_Class:
     READS THE TIME WINDOW USED WHEN RUNNING SOHO_DATA_GEN.PY FROM THE H5 DATA FILE. THIS TIME_WINDOW IS TIME_STEP_PREV HERE.
     """
     def time_step_prev_reader(self):
-        pattern = f'*{self.base}*{self.mission}*[metadata]*[!sync].h5'
+        pattern = f'*{self.base_full}*{self.mission}*[metadata]*[!sync].h5'
         name = pattern_finder(self.home_dir, pattern)
         print('name from time_step_prev_reader:', name)
         time_step_prev = name.split('_')[-5] #was [-4] previously and [-2] before that
         print('time_step_prev from fcn:', time_step_prev)
+        self.time_step_prev = int(time_step_prev)
         
         return int(time_step_prev)
     
@@ -99,7 +103,7 @@ class Base_Class:
     def fits_times_reader(self): 
     
         print('base:', self.base)
-        filepath = self.home_dir + self.base  + f'_{self.mission}' + '/'
+        filepath = self.home_dir + self.base_full  + f'_{self.mission}' + '/'
     
         data_files_pre_pre = [f for f in listdir(filepath) if isfile(join(filepath, f))]
         data_files_pre = [f for f in data_files_pre_pre if 'fits' in f] #to ensure that only FITS files are collected, just in case    
@@ -115,7 +119,7 @@ class Base_Class:
     """
     def csv_times_reader(self): 
         
-        pattern = f'*{self.base}*{self.mission}*[!sync].csv'
+        pattern = f'*{self.base_full}*{self.mission}*[!sync].csv'
         name = pattern_finder(self.home_dir, pattern)
         print('name from csv_times_reader:', name)
         csv_data = pd.read_csv(name, usecols= ['time_at_ind'])
@@ -128,16 +132,17 @@ class Base_Class:
     FIND CORRESPONDING DATA CUBE PER PRODUCT AND EXTRACT ITS DATA AND DIMENSION.
     """
     def cube_data_reader(self):
-        pattern = f'*{self.base}*{self.mission}*[metadata]*[!sync].h5'
+        pattern = f'*{self.base_full}*{self.mission}*[metadata]*[!sync].h5'
+        print(pattern)
         name = pattern_finder(self.home_dir, pattern)            
         print('cube name:', name)
         cube_dim = name.split('_')[-2] #.split('.')[0] #str
         print('cube_dim:', cube_dim)
                     
-        cube = h5py.File(f'{self.home_dir}{self.name}', 'r')
-        cube_data = cube[f'{self.base}_{self.mission}_{cube_dim}'][:]
+        cube = h5py.File(f'{self.home_dir}{name}', 'r')
+        cube_data = cube[f'{self.base_full}_{self.mission}_{cube_dim}'][:]
         
-        meta_items_pre = cube[f'{self.base}_{self.mission}_{cube_dim}_metadata'][()]    
+        meta_items_pre = cube[f'{self.base_full}_{self.mission}_{cube_dim}_metadata'][()]    
         print('len(meta_items_pre):', len(meta_items_pre))
         
         cube.close()
@@ -169,14 +174,14 @@ class Base_Class:
               cube_data_mod_pre_pre = cube_data[ind_start:ind_end+1]
               cube_data_mod_pre = np.array([cube_data_mod_pre_pre[i] for i in sync_time_inds_mod])
               cube_data_mod = cube_data_mod_pre.astype('int16')
-              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base_full}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
 
          else:
               cube_data_mod = cube_data.astype('int16')
-              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{flag_lasco}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
+              file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base_full}_{flag_lasco}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_metadata_sync.h5'
               
          cube_sync = h5py.File(file_name, 'w')
-         cube_sync.create_dataset(f'{self.base}_{self.mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
+         cube_sync.create_dataset(f'{self.base_full}_{self.mission}_{cube_dim}', data=cube_data_mod) #not compressing images here since images compressed initially in data generation step #compression="gzip"
 
               
          ### metadata method continued ###
@@ -193,7 +198,7 @@ class Base_Class:
               #cube_sync.attrs[f'{met[0]}_syncslice{slice_counter}'] = met[1]
          print('data cube slice count:', slice_counter)
               
-         cube_sync.create_dataset(f'{self.base}_{self.mission}_{cube_dim}_metadata', data=json.dumps(meta_data_dict, cls=NpEncoder))
+         cube_sync.create_dataset(f'{self.base_full}_{self.mission}_{cube_dim}_metadata', data=json.dumps(meta_data_dict, cls=NpEncoder))
          cube_sync.attrs['NOTE'] = 'JSON serialization'
          
          cube_sync.close()     
@@ -205,15 +210,44 @@ class Base_Class:
     """
     def csv_time_sync_writer(self, base_list_len, cube_dim, sync_time_list_mod, time_step_prev, flag_lasco=None):
          if flag_lasco is None:
-             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base_full}_{self.mission}_{base_list_len}products_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
          else:
-             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base}_{self.mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
+             file_name = f'{self.home_dir}{self.date_start}_to_{self.date_finish}_{self.base_full}_{self.mission}_{base_list_len}products_{flag_lasco}_{time_step_prev}_{self.time_step}_{cube_dim}_times_sync.csv'
          
          if not isfile(file_name):
              with open(file_name, 'a') as f:
                  writer = csv.writer(f, delimiter='\n')
                  writer.writerow(sync_time_list_mod)
+                 
+                 
+    """
+    CHECKS THAT THE DIMENSION AMONG FITS FILES COMING FROM THE DIFFERENT SPECIFIED PRODUCTS IS INDEED THE SAME.
+    """
+    def dimension_checker_from_fits(self, data_dim_list):
+        filepath = self.home_dir + self.base_full + f'_{self.mission}' + '/'
+        data_file_pre = [f for f in listdir(filepath) if isfile(join(filepath, f))] #[0]
+        data_file = [f for f in data_file_pre if 'fits' in f][0]
+        data_dim = data_file.split('_')[self.data_dim_num].split('.')[0]
+        data_dim_list.append(data_dim)
+        
+        return data_dim_list
+
     
+          
+    """
+    CHECKS THAT THE DIMENSION AMONG THE H5 CUBE AND CSV FILES COMING FROM THE DIFFERENT SPECIFIED PRODUCTS IS INDEED THE SAME.
+    """
+    def dimension_checker_from_h5cube_csv(self, data_dim_list): #assumes all h5 files in the same directory which is one above the product (base) directory
+
+        name = pattern_finder(self.home_dir, pattern = f'*{self.base_full}*{self.mission}*[metadata]*[!sync].h5')
+        print('cube name:', name)
+        cube_dim = name.split('_')[-2] #.split('.')[0]
+        print('cube_dim:', cube_dim)
+        data_dim_list.append(cube_dim)
+        
+        return data_dim_list
+         
+        
     
     
     
@@ -237,28 +271,11 @@ def pattern_finder(home_dir, pattern):
     
     return name
 
-      
-"""
-CHECKS THAT THE DIMENSION AMONG THE H5 CUBE AND CSV FILES COMING FROM THE DIFFERENT SPECIFIED PRODUCTS IS INDEED THE SAME.
-"""
-def dimension_checker_from_h5cube_csv(home_dir, base_list, mission): #assumes all h5 files in the same directory which is one above the product (base) directory
+       
 
-    data_dim_list = []
-    for base in base_list:
-        base = base.strip(' ')
-        
-        name = pattern_finder(home_dir, pattern = f'*{base}*{mission}*[metadata]*[!sync].h5')
-        print('cube name:', name)
-        cube_dim = name.split('_')[-2] #.split('.')[0]
-        print('cube_dim:', cube_dim)
-        data_dim_list.append(cube_dim)
 
-    ind_dim = np.where(data_dim_list[0] == np.array(data_dim_list))[0] 
-     
-    if len(ind_dim) == len(data_dim_list):
-        return True
-    else: 
-        return False        
+
+
 
 """
 CONVERTS TIME STRINGS INTO DATETIME OBJECTS. ALLOWS TO SPECIFY A SUBSET OF THE DATE RANGES THAT HAD BEEN USED WHEN RUNNING MISSION_DATA_GEN.PY. 
@@ -289,7 +306,7 @@ def times_actualizer(data_raw_times, date_start, date_finish): #produces a subse
     return list(data_times_revised), data_times, ind_start, ind_end
 
 """
-FINDS THE TIME_WINDOW USED PREVIOUSLY WHEN RUNNING SOHO_DATA_GEN.PY. IN THIS PROGRAM THE NAME IS CHANGED TO TIME_STEP.
+FINDS THE TIME_WINDOW USED PREVIOUSLY WHEN RUNNING MISSION_DATA_GEN.PY. IN THIS PROGRAM THE NAME IS CHANGED TO TIME_STEP.
 """
 def min_time_step(data_times):
     
