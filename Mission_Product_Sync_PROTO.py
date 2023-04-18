@@ -6,7 +6,7 @@ import Mission_utility.product_time_sync as pts
 date_start =  '2005-12-01'#'2002-04-01' #'1999-04-04' # '2010-10-01'
 date_finish = '2005-12-07'#'2002-04-07' #'1999-04-09' # '2010-10-05'
 time_step = 12
-home_dir = '/Users/gohawks/Desktop/soho-ml-data/soho-ml-data-ready-martinkus/'
+home_dir = '/Users/gohawks/Desktop/swpc-local/soho-ml-data/soho-ml-data-ready-martinkus/'
 bases = 'LASCO_C2, EIT195' #,LASCO_C3'#MDI_96m #AIA #HMI #'EIT195'
 fits_provided = 'Y' #are fits files provided?
 sub_Fcorona = 'N' #if applicable, do you want additional data cubes that subtract fcorona?
