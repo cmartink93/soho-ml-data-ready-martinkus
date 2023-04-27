@@ -42,7 +42,7 @@ print('image_size_output:', image_size_output)
 print('flag:', flag)
 print('home_dir:', home_dir)
 
-url_prefix = 'https://seal.nascom.nasa.gov/'
+url_prefix = 'https://seal.nascom.nasa.gov'
 print('url_prefix:', url_prefix)
 
 look_ahead = int(np.ceil(time_window*60/10.)) #should sufficiently cover all 7 products based on their cadence.
@@ -85,7 +85,7 @@ for base in tqdm(base_list):
         prev_time, time_range_modified = ipy.prev_time_resumer(home_dir, time_range, date_time_end, BaseClass) #time_range_modified.next() is the workshorse that advances time at the end of the time for-loop
         for t_value in tqdm(np.arange(num_loops)): #this is the main workhorse loop of the program
             #print('t_value:', t_value)
-            #print('prev_time:', prev_time)
+            print('prev_time:', prev_time)
                 
             if time_range_modified.end > date_time_end:
                 time_range_modified = TimeRange(time_range_modified.start, date_time_end) 
@@ -107,7 +107,7 @@ for base in tqdm(base_list):
                 
             if (product_results_number != 0) and (client_export_failed == False): #product_results.has_failed()
                 ind = BaseClass.index_of_sizes(product_results) 
-                size_sieved_df, fetch_indices_product_orig = ipy.fetch_indices(ind,product_results,time_window, prev_time, BaseClass)
+                size_sieved_df, fetch_indices_product_orig = ipy.fetch_indices(ind,product_results,time_window, prev_time, time_range_modified, BaseClass)
                 if len(fetch_indices_product_orig) != 0:
                 
                     size_sieved_df = ipy.product_distiller(fetch_indices_product_orig, size_sieved_df, date_time_end, product_results, look_ahead, time_window, url_prefix, flag, image_size_output, home_dir, email, client, BaseClass)

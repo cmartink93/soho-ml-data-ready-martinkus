@@ -171,10 +171,10 @@ def prev_time_resumer(home_dir, time_range_orig, date_time_end, BaseClass):
     if len(data_files) != 0:
         prev_time_pre = data_files[-1]
         
-        if ('EIT' in str(prev_time_pre)) or ('AIA' in str(prev_time_pre)): 
-            prev_time = [prev_time_pre.split('_')[2]]
-        else:
+        if ('LASCO' in str(prev_time_pre)) or ('MDI' in str(prev_time_pre)): 
             prev_time = [prev_time_pre.split('_')[3]]
+        else:
+            prev_time = [prev_time_pre.split('_')[2]]
              
         time_orig_pre = str(time_range_orig.start)
         time_orig = ''.join(time_orig_pre.split(' ')[0].split('-'))
@@ -183,6 +183,7 @@ def prev_time_resumer(home_dir, time_range_orig, date_time_end, BaseClass):
             time_begin = prev_time[0]
             time_range = TimeRange(time_begin, date_time_end)
         else:
+            prev_time = []
             time_range = time_range_orig            
     
     elif len(data_files) == 0:
@@ -323,9 +324,11 @@ def data_cuber(home_dir, date_start, date_finish, flag, time_window, image_size_
     else:
         data_content_stack = [] 
                   
-    time_start_name_new, time_finish_name_new = data_name_selector(home_dir, date_start, date_finish, BaseClass)
+    #time_start_name_new, time_finish_name_new = data_name_selector(home_dir, date_start, date_finish, BaseClass)
         
-    data_cube = h5py.File(f'{home_dir}{time_start_name_new}_to_{time_finish_name_new}_{BaseClass.base_full}_{flag}_{time_window}_LASCOlev1-{BaseClass.lev1_lasco}_{BaseClass.mission}_{image_size_output}_metadata.h5', 'w')
+    #data_cube = h5py.File(f'{home_dir}{time_start_name_new}_to_{time_finish_name_new}_{BaseClass.base_full}_{flag}_{time_window}_LASCOlev1-{BaseClass.lev1_lasco}_{BaseClass.mission}_{image_size_output}_metadata.h5', 'w')
+    data_cube = h5py.File(f'{home_dir}{date_start}_to_{date_finish}_{BaseClass.base_full}_{flag}_{time_window}_LASCOlev1-{BaseClass.lev1_lasco}_{BaseClass.mission}_{image_size_output}_metadata.h5', 'w')
+
     ##########data_cube_group = data_cube.create_group(f'{base}_{mission}_{image_size_output}')
     data_cube.create_dataset(f'{BaseClass.base_full}_{BaseClass.mission}_{image_size_output}', data=data_content_stack, compression="gzip")
     
@@ -353,7 +356,7 @@ def data_cuber(home_dir, date_start, date_finish, flag, time_window, image_size_
 From the appropriate file size image indices, this function picks up those times and their corresponding indices that are seperated by the user defined time window. 
 The indices returned by this function will be used in the product object returned by Fido search.
 """
-def fetch_indices(ind,product_results,time_window,prev_time, BaseClass):
+def fetch_indices(ind,product_results,time_window,prev_time, time_range_modified, BaseClass):
     
     all_size_sieved_times_pre_list = [] #local list to populate at each loop
     all_time_window_sieved_times_product_times = []  #local list to populate at each loop
@@ -439,7 +442,7 @@ def get_next_good_time_if_bad(fetch_inds_to_try_list, size_sieved_df, time_data,
             indiv_ind = size_sieved_df.loc[size_sieved_df['time_at_ind']==time_data]['orig_ind'].values[0]
         
     elif len(fetch_inds_to_try_list) == 1: #if already exhausted all options within zoomed time window, go to next time window
-        time_data, indiv_ind = get_next_good_time(size_sieved_df, possible_times, time_data, time_window, indiv_ind)
+        time_data, indiv_ind, fetch_inds_to_try_list, possible_times_mod = get_next_good_time(size_sieved_df, possible_times, time_data, time_window, indiv_ind, possible_times_mod)
     
     else: #see if any other products are within zoomed time window and can be used instead
         zoomed_time_range = TimeRange(str(time_data),timedelta(hours=time_window))
@@ -448,7 +451,7 @@ def get_next_good_time_if_bad(fetch_inds_to_try_list, size_sieved_df, time_data,
             if time_val in zoomed_time_range: #this is the next fitting time in the list, slightly less than 2hrs seperated theoretically
                 fetch_inds_to_try_list.append(time_val)
         if len(fetch_inds_to_try_list) == 0:
-            time_data, indiv_ind = get_next_good_time(size_sieved_df, possible_times, time_data, time_window, indiv_ind, possible_times_mod)
+            time_data, indiv_ind, fetch_inds_to_try_list, possible_times_mod = get_next_good_time(size_sieved_df, possible_times, time_data, time_window, indiv_ind, possible_times_mod)
         else:
             time_data = fetch_inds_to_try_list[0]
             indiv_ind = size_sieved_df.loc[size_sieved_df['time_at_ind']==time_data]['orig_ind'].values[0]
@@ -488,7 +491,9 @@ def product_distiller(fetch_indices_product_orig, size_sieved_df, date_time_end,
                     time_data, indiv_ind, fetch_inds_to_try_list, possible_times_mod = get_next_good_time(size_sieved_df, possible_times, time_data, time_window, indiv_ind, possible_times_mod)
                     
                 else:
-                    if (not BaseClass.planet_comet_transient_filter(data_product)): #if both line list and blob lost is empty then can use LASCO image.
+                    #BaseClass.planet_comet_transient_filter(data_product) == False
+                    lines = BaseClass.planet_comet_transient_filter(data_product)
+                    if ( len(lines) < 5): #if both line list and blob lost is empty then can use LASCO image.  
                         writefits(f'{BaseClass.base_full}_{BaseClass.mission}/{BaseClass.mission}_{BaseClass.base_full}_{time_data}_{image_size_output}', reduced_product_data, header_product, home_dir)
                         os.remove(query_result[0]) #delete original downloaded file
                         size_sieved_df.loc[size_sieved_df['orig_ind']==indiv_ind, ['is_good']] = 1
