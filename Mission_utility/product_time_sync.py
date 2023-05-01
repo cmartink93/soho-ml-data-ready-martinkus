@@ -122,7 +122,9 @@ class Base_Class:
         pattern = f'*{self.base_full}*{self.mission}*[!sync].csv'
         name = pattern_finder(self.home_dir, pattern)
         print('name from csv_times_reader:', name)
-        csv_data = pd.read_csv(name, usecols= ['time_at_ind'])
+        csv_data = pd.read_csv(name, usecols= ['time_at_ind','is_good'])
+        csv_data = csv_data[csv_data['is_good'] == 1]
+        print(csv_data)
         csv_uniq_times = list(np.unique(csv_data))
         print('len(csv_uniq_times):', len(csv_uniq_times))
                     
