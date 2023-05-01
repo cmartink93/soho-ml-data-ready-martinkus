@@ -38,7 +38,6 @@ class SOHO_no_MDI:
         if 'EIT' in self.base_full:
             self.base = 'EIT'
             self.wavelen = int(self.base_full[3:6])
-            self.fido_parms = ''
         elif 'LASCO' in self.base_full:
             self.base = 'LASCO'
             self.detector = self.base_full.split('_')[1]
